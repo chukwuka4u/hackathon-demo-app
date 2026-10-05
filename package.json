@@ -1,0 +1,22 @@
+{
+  "name": "kora-installments-test-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fully standalone consumer app for testing the published kora-installments npm package (installs from a vendored tarball, not source).",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "kora-installments": "^0.1.0",
+    "node-cron": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.7.3"
+  }
+}

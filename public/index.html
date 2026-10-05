@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kora-installments demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; line-height: 1.5; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  form { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 1.5rem; }
+  form label { display: flex; flex-direction: column; font-size: 0.85rem; gap: 4px; }
+  input { padding: 6px 8px; font-size: 0.95rem; }
+  button { padding: 8px 14px; font-size: 0.9rem; cursor: pointer; }
+  .plan { border: 1px solid #8888; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  .plan-header { display: flex; justify-content: space-between; align-items: center; }
+  .badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; text-transform: capitalize; }
+  .badge.awaiting_authorization { background: #f5a62333; color: #a86a00; }
+  .badge.active { background: #2563eb33; color: #2563eb; }
+  .badge.completed { background: #16a34a33; color: #16a34a; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #8884; }
+  .status.paid { color: #16a34a; }
+  .status.due, .status.pending { color: #a86a00; }
+  .status.failed { color: #dc2626; }
+  .note { font-size: 0.8rem; opacity: 0.75; margin-top: 4px; }
+  .instructions { background: #8881; padding: 10px 12px; border-radius: 6px; font-size: 0.85rem; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <h1>kora-installments — standalone test app</h1>
+  <p class="note">Installed from a vendored .tgz tarball, exactly as a real npm consumer would — not linked to package source. See src/server.ts.</p>
+
+  <h2>Create a plan</h2>
+  <form id="create-form">
+    <label>Customer name <input name="name" value="Jane Doe" required /></label>
+    <label>Email <input name="email" value="jane@example.com" required /></label>
+    <label>Account number <input name="account_number" value="0112345678" required /></label>
+    <label>Bank code <input name="bank_code" value="058" required /></label>
+    <label>Phone number <input name="phone_number" value="08012345678" required /></label>
+    <label>Total amount (NGN) <input name="totalAmount" type="number" value="120000" required /></label>
+    <label># installments <input name="numberOfInstallments" type="number" value="3" required /></label>
+    <div></div>
+    <button type="submit">Create plan</button>
+  </form>
+
+  <h2>Plans</h2>
+  <div id="plans"></div>
+
+<script>
+const plansEl = document.getElementById("plans");
+
+document.getElementById("create-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const res = await fetch("/api/plans", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      customerId: "cust-" + Date.now(),
+      customer: {
+        name: f.get("name"), email: f.get("email"),
+        account_number: f.get("account_number"), bank_code: f.get("bank_code"),
+        phone_number: f.get("phone_number"),
+      },
+      totalAmount: Number(f.get("totalAmount")),
+      currency: "NGN",
+      numberOfInstallments: Number(f.get("numberOfInstallments")),
+    }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  await refresh();
+});
+
+async function activate(planId) {
+  await fetch(`/api/plans/${planId}/activate`, { method: "POST",  });
+  await refresh();
+}
+async function chargeTask(planId) {
+  const res = await fetch(`/api/plans/${planId}/charge-schedule`, { method: "POST" });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  setInterval(async () => {
+    await refresh();
+    console.log("another installment charge from", planId);
+  }, 6000)
+}
+async function charge(reference) {
+  const res = await fetch(`/api/installments/${reference}/charge`, { method: "POST"});
+  if (!res.ok) { alert((await res.json()).error); }
+  await refresh();
+}
+
+function money(n) { return "N" + Number(n).toLocaleString(); }
+
+async function refresh() {
+  const res = await fetch("/api/plans");
+  const plans = await res.json();
+
+  if (plans.length === 0) {
+    plansEl.innerHTML = "<p class=\"note\">No plans yet — create one above.</p>";
+    return;
+  }
+
+  plansEl.innerHTML = plans.map(({ plan, installments }) => {
+    const rows = installments.map(i => `
+      <tr>
+        <td>#${i.sequence}</td>
+        <td>${money(i.amount)}</td>
+        <td>${new Date(i.dueDate).toLocaleDateString()}</td>
+        <td class="status ${i.status}">${i.status}</td>
+        <td>${i.status !== "paid" && plan.status === "active"
+          ? `<button onclick="charge('${i.reference}')">Charge</button>`
+          : ""}</td>
+      </tr>`).join("");
+    return `
+      <div class="plan">
+        <div class="plan-header">
+          <strong>Plan ${plan.id.slice(0, 8)}</strong>
+          <span class="badge ${plan.status}">${plan.status.replace("_", " ")}</span>
+        </div>
+        <div class="note">Customer: ${plan.customerId} · Total: ${money(plan.totalAmount)}</div>
+        ${plan.status === "awaiting_authorization"
+          ? `<div class="instructions">Customer would normally transfer N50 to activate the authorization.
+             <button onclick="activate('${plan.id}')">Simulate customer activation</button></div>`
+          : plan.status === "active"
+          ? `<div class="instructions">start installment simulation.
+             <button onclick="chargeTask('${plan.id}')">Charge</button></div>`
+            : ""}
+        <table>
+          <thead><tr><th>#</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }).join("");
+}
+
+refresh();
+</script>
+</body>
+</html>
